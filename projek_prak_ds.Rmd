@@ -1,0 +1,265 @@
+---
+title: "proyek_ds"
+author: "kelompok_berapa"
+date: "2024-12-01"
+output: pdf_document
+---
+
+{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+
+
+#import data dan library
+
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(dplyr)
+library(randomForest)
+```
+
+
+#data pre-procesing
+
+
+
+```{r}
+data <- read.csv("data_rumah_banglades_final.csv")
+
+#mengambil data hanya building_type = Apartment
+#mengambil data hanya building_nature = residental
+#mengambil data hanya purpose = sale 
+
+data <- data %>% filter(building_type == "Apartment")
+data <- data %>% filter(building_nature == "Residential")
+data <- data %>% filter(purpose == "Sale")
+data <- data %>% filter(zone == "Badda" | zone == "Khilgaon" | zone == "Mirpur" | zone == "Turag")
+data <- data %>% select(-c(city, locality, division, image_url, property_description, property_overview, property_url, address, id))
+
+#data <- data[!grepl("No\\.", data$locality), ]
+
+
+#menghilangkan baris yang terdapat nilai NA/""
+data[data == "NA"] <- NA
+data[data == ""] <- NA
+data <- drop_na(data)
+
+# Menghitung Q1 dan Q3
+Q1 <- quantile(data$price, 0.30)
+Q3 <- quantile(data$price, 0.70)
+
+# Menghitung IQR
+IQR_value <- Q3 - Q1
+
+# Menentukan batas bawah dan atas
+lower_bound <- Q1 - 1.5 * IQR_value
+upper_bound <- Q3 + 1.5 * IQR_value
+
+# Menghapus outlier yang berada di luar rentang IQR
+dataClean <- subset(data, price >= lower_bound & price <= upper_bound)
+
+dataClean <- dataClean %>% group_by(zone)
+# Menampilkan data setelah outlier dihapus
+#summary(dataClean)
+
+```
+
+
+
+
+
+#mau liat data
+
+
+```{r}
+liatData <- dataClean %>% group_by(zone) %>% summarise(rata_rata = mean(price))
+liatData
+
+```
+
+
+# data splitting
+
+
+
+```{r}
+set.seed(123)
+data_split <- initial_split(dataClean, prop = 0.8, strata = zone)
+trainData <- training(data_split)
+testData <- testing(data_split)
+
+trainData
+testData
+```
+
+#modeling
+
+
+```{r}
+# Membuat model Random Forest
+model_rf = randomForest(price ~ num_bath_rooms + num_bed_rooms+ relaxation_amenity_count + security_amenity_count + maintenance_or_cleaning_amenity_count + social_amenity_count + expendable_amenity_count + unclassify_amenity_count + zone, data = trainData)
+
+# Menampilkan summary model
+print(model_rf)
+```
+
+
+
+# testing
+
+
+```{r}
+hasil_testing <- predict(model_rf, newdata = testData)
+hasil_testing <- round(hasil_testing, digits = 2)
+
+```
+
+
+#eval
+
+
+```{r}
+# Evaluasi Model
+actual_values <- testData$price  # Harga aktual dari data testing
+predicted_values <- hasil_testing # Hasil prediksi
+
+# Mean Absolute Error (MAE)
+mae <- mean(abs(actual_values - predicted_values))
+
+# Root Mean Squared Error (RMSE)
+rmse <- sqrt(mean((actual_values - predicted_values)^2))
+
+# Mean Absolute Percentage Error (MAPE)
+mape <- mean(abs((actual_values - predicted_values) / actual_values)) * 100
+
+# Output evaluasi
+cat("Mean Absolute Error (MAE):", round(mae, 2), "\n")
+cat("Root Mean Squared Error (RMSE):", round(rmse, 2), "\n")
+cat("Mean Absolute Percentage Error (MAPE):", round(mape, 2), "%\n")
+
+
+```
+
+```{r}
+#visualisasi
+
+
+# Membuat dataframe hasil prediksi tanpa menggunakan bind_cols()
+predicted_results <- data.frame(
+  Actual_Price = testData$price,
+  Predicted_Price = hasil_testing
+)
+
+# Menampilkan beberapa baris hasil prediksi
+predicted_results
+```
+
+
+```{r}
+# Membuat summary statistik berdasarkan zone
+stats_by_zone <- dataClean %>%
+  group_by(zone) %>%
+  summarise(
+    Q1 = quantile(price, 0.25),
+    Q2 = median(price),
+    Q3 = quantile(price, 0.75)
+  )
+print(stats_by_zone)
+
+# Visualisasi boxplot distribusi harga rumah berdasarkan zone dengan tampilan yang lebih menarik
+ggplot(dataClean, aes(x = zone, y = price, fill = zone)) +
+  geom_boxplot(outlier.colour = "darkred", outlier.shape = 16, outlier.size = 3, alpha = 0.8) +  # Outlier lebih mencolok dan transparan
+  scale_fill_viridis_d(option = "plasma") +  # Menggunakan palet warna gradasi dari viridis untuk estetika yang lebih modern
+  geom_jitter(color = "black", size = 0.4, alpha = 0.4, width = 0.2) +  # Menambahkan jitter untuk melihat distribusi data
+  labs(
+    title = "Distribusi Harga Rumah Berdasarkan Zona",
+    subtitle = "Menggunakan Q1, Median, dan Q3 sebagai Pembatas",
+    x = "Zona",
+    y = "Harga Rumah (Taka)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold", color = "#4A90E2"),  # Judul lebih besar dan menarik
+    plot.subtitle = element_text(hjust = 0.5, size = 14, face = "italic", color = "#50C878"),  # Subtitle dengan warna berbeda
+    axis.title.x = element_text(size = 14, face = "bold", color = "#FF6F61"),  # Warna sumbu X lebih cerah
+    axis.title.y = element_text(size = 14, face = "bold", color = "#FF6F61"),  # Warna sumbu Y lebih cerah
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1, color = "darkblue"),  # Warna label zona lebih kontras
+    axis.text.y = element_text(size = 12, color = "darkblue"),
+    panel.grid.major = element_line(color = "#D3D3D3"),  # Gaya grid lebih lembut
+    panel.grid.minor = element_blank(),  # Menghilangkan grid minor
+    plot.background = element_rect(fill = "#F0F8FF"),  # Latar belakang keseluruhan grafik
+    panel.background = element_rect(fill = "#FAFAD2"),  # Latar belakang panel
+    legend.position = "none"  # Menghilangkan legenda untuk warna
+  ) +
+  annotate("text", x = 1, y = max(dataClean$price), label = "Zona Paling Mahal", size = 5, color = "darkred", fontface = "bold", hjust = 1.5) +  # Anotasi untuk zona paling mahal
+  geom_hline(yintercept = median(dataClean$price), linetype = "dashed", color = "blue", size = 1.2)  # Garis untuk median keseluruhan
+
+```
+
+
+```{r}
+# Visualisasi Actual vs Predicted Prices
+ggplot(predicted_results, aes(x = Actual_Price, y = Predicted_Price)) +
+  geom_point(color = "steelblue", size = 2) +  # Mengubah warna dan ukuran titik
+  geom_abline(slope = 1, intercept = 0, color = "darkred", linetype = "dashed", size = 1.2) +  # Garis diagonal 1:1
+  labs(
+    title = "Actual vs Predicted Prices",
+    x = "Actual Prices",
+    y = "Predicted Prices"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),  # Memusatkan judul
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 12, face = "bold")
+  )
+
+```
+
+
+```{r}
+# Fungsi untuk memprediksi harga berdasarkan input fitur
+predict_house_price <- function(num_bath_rooms, num_bed_rooms, relaxation_amenity_count, 
+                                security_amenity_count, maintenance_or_cleaning_amenity_count, 
+                                social_amenity_count, expendable_amenity_count, 
+                                unclassify_amenity_count, zone) {
+  
+  # Membuat data frame dengan input fitur
+  input_data <- data.frame(
+    num_bath_rooms = num_bath_rooms,
+    num_bed_rooms = num_bed_rooms,
+    relaxation_amenity_count = relaxation_amenity_count,
+    security_amenity_count = security_amenity_count,
+    maintenance_or_cleaning_amenity_count = maintenance_or_cleaning_amenity_count,
+    social_amenity_count = social_amenity_count,
+    expendable_amenity_count = expendable_amenity_count,
+    unclassify_amenity_count = unclassify_amenity_count,
+    zone = zone
+  )
+  
+  # Melakukan prediksi harga menggunakan model Random Forest
+  predicted_price <- predict(model_rf, newdata = input_data)
+  
+  # Mengembalikan harga yang diprediksi
+  return(predicted_price)
+}
+
+# Contoh penggunaan fungsi untuk memprediksi harga rumah
+predicted_price <- predict_house_price(num_bath_rooms = 2, 
+                                       num_bed_rooms = 3, 
+                                       relaxation_amenity_count = 1, 
+                                       security_amenity_count = 2, 
+                                       maintenance_or_cleaning_amenity_count = 1, 
+                                       social_amenity_count = 3, 
+                                       expendable_amenity_count = 0, 
+                                       unclassify_amenity_count = 1, 
+                                       zone = "Mirpur")
+
+# Menampilkan hasil prediksi
+print(paste("Prediksi harga rumah: Rp", round(predicted_price, 2)))
+```
+
+
